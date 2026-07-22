@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Caderno de Receitas &amp; Afeto</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:wght@400;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script id="tailwind-config">
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          "primary-container": "#5f7a61", "secondary-container": "#ffca98",
+          "surface-container-low": "#f8f4db", "primary-fixed-dim": "#b1ceb1",
+          "inverse-on-surface": "#f5f1d8", "inverse-surface": "#323120",
+          "surface": "#fefae0", "primary": "#47614a",
+          "on-tertiary-fixed-variant": "#45492f", "outline-variant": "#c3c8bf",
+          "surface-container": "#f2efd5", "on-background": "#1d1c0d",
+          "on-surface-variant": "#434842", "tertiary-container": "#727659",
+          "on-primary-container": "#efffec", "error": "#ba1a1a",
+          "error-container": "#ffdad6", "on-error-container": "#93000a",
+          "on-tertiary": "#ffffff", "outline": "#737971",
+          "on-primary": "#ffffff", "surface-bright": "#fefae0",
+          "on-secondary": "#ffffff", "tertiary": "#595d42",
+          "surface-dim": "#dedbc2", "on-secondary-fixed-variant": "#623f18",
+          "on-secondary-container": "#7a532a", "surface-container-lowest": "#ffffff",
+          "on-error": "#ffffff", "on-tertiary-container": "#fafed9",
+          "secondary": "#7d562d", "surface-container-highest": "#e7e3ca",
+          "surface-container-high": "#ede9cf", "background": "#fefae0",
+          "on-surface": "#1d1c0d", "surface-variant": "#e7e3ca",
+          "critical": "#ba1a1a", "critical-bg": "#ffdad6",
+          "low-stock": "#8a5a12", "low-stock-bg": "#ffe6bf",
+          "ok-stock": "#2e6b3e", "ok-stock-bg": "#dcf2df"
+        },
+        borderRadius: { DEFAULT: "0.5rem", lg: "0.75rem", xl: "1rem", full: "9999px" },
+        fontFamily: {
+          serif: ["Libre Caslon Text", "serif"],
+          sans: ["Manrope", "sans-serif"]
+        }
+      }
+    }
+  };
+</script>
+<style>
+  body { font-family: 'Manrope', sans-serif; -webkit-tap-highlight-color: transparent; }
+  h1,h2,h3,.font-serif { font-family: 'Libre Caslon Text', serif; }
+  .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; vertical-align: middle; }
+  .soft-shadow { box-shadow: 0 4px 20px -4px rgba(71,97,74,0.15); }
+  ::-webkit-scrollbar { width: 6px; height:6px; }
+  ::-webkit-scrollbar-thumb { background: #c3c8bf; border-radius: 9999px; }
+  input[type=range]{ -webkit-appearance:none; height:6px; border-radius:9999px; background:#c3c8bf; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:20px; height:20px; border-radius:9999px; background:#47614a; border:3px solid white; box-shadow:0 1px 4px rgba(0,0,0,.3); cursor:pointer; }
+  .fade-in { animation: fadeIn .25s ease; }
+  @keyframes fadeIn { from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);} }
+</style>
+</head>
+<body class="bg-surface-dim">
+<div class="max-w-[480px] mx-auto min-h-screen bg-surface soft-shadow relative flex flex-col">
+  <div id="toast" class="pointer-events-none fixed left-1/2 -translate-x-1/2 top-4 z-50 max-w-[440px] w-[90%]"></div>
+  <div id="app" class="flex-1 pb-24"></div>
+  <nav id="bottomnav" class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] bg-surface-container-lowest border-t border-outline-variant flex items-stretch z-40"></nav>
+</div>
+
+<script>
+/* ---------------- Supabase config ----------------
+   1. Crie um projeto em https://supabase.com
+   2. Rode o arquivo supabase-schema.sql no "SQL Editor" do projeto
+   3. Em Project Settings > API, copie a "Project URL" e a chave "anon public"
+   4. Cole as duas abaixo. */
+const SUPABASE_URL = "https://ttysjnktbvzuddyxtlpf.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_vZqF9fHVbFEVU5_UWTWIOg_4pzfIvuC";
+const supabaseClient = (SUPABASE_URL.startsWith('http'))
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/* ---------------- Data model & storage ---------------- */
+const UNITS = {
+  g:  { base:'g',  factor:1,    label:'g'  },
+  kg: { base:'g',  factor:1000, label:'kg' },
+  ml: { base:'ml', factor:1,    label:'ml' },
+  l:  { base:'ml', factor:1000, label:'l'  },
+  un: { base:'un', factor:1,    label:'un' },
+};
+const UNIT_LIST = ['g','kg','ml','l','un'];
+
+function toBase(qty, unit){
+  const u = UNITS[unit] || UNITS.g;
+  return { qty: (Number(qty)||0) * u.factor, base: u.base };
+}
+function fmtQty(qty, unit){
+  qty = Number(qty)||0;
+  if(unit==='g' && Math.abs(qty)>=1000) return trimNum(qty/1000)+' kg';
+  if(unit==='ml' && Math.abs(qty)>=1000) return trimNum(qty/1000)+' l';
+  return trimNum(qty)+' '+unit;
+}
+function trimNum(n){ return (Math.round(n*100)/100).toString().replace('.', ','); }
+function money(v){ v = Number(v)||0; return 'R$ ' + v.toFixed(2).replace('.', ','); }
+function normName(s){ return (s||'').trim().toLowerCase(); }
+function capitalize(s){ return (s||'').replace(/\b\w/g, c=>c.toUpperCase()); }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function fmtDate(iso){
+  if(!iso) return '—';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+let DB = { recipes: [], stock: [], prices: [] };
+let LOADED = false;
+
+function seedData(){
+  const priceIds = [uid(), uid(), uid()];
+  return {
+    recipes: [{
+      id: uid(), emoji: '🍪', name: 'Cookies de Gotas de Chocolate',
+      servings: 12, sliceWeight: 60,
+      laborCost: 15, packagingCost: 5, taxPercent: 6, markup: 3,
+      steps: [
+        'Separar os ingredientes secos em uma tigela.',
+        'Separar os ingredientes molhados.',
+        'Misturar os molhados vigorosamente por 2 minutos.',
+        'Juntar os secos e bater apenas por 1 minuto até incorporar.',
+        'Adicionar as gotas de chocolate e misturar levemente.'
+      ],
+      ingredients: [
+        { id: uid(), group: 'Secos', name: 'Farinha de Trigo', qty: 250, unit: 'g' },
+        { id: uid(), group: 'Secos', name: 'Sal', qty: 3, unit: 'g' },
+        { id: uid(), group: 'Secos', name: 'Fermento Químico', qty: 3, unit: 'g' },
+        { id: uid(), group: 'Secos', name: 'Bicarbonato de Sódio', qty: 3, unit: 'g' },
+        { id: uid(), group: 'Molhados', name: 'Manteiga Sem Sal', qty: 170, unit: 'g' },
+        { id: uid(), group: 'Molhados', name: 'Açúcar Mascavo', qty: 100, unit: 'g' },
+        { id: uid(), group: 'Molhados', name: 'Açúcar Comum', qty: 80, unit: 'g' },
+        { id: uid(), group: 'Molhados', name: 'Essência de Baunilha', qty: 5, unit: 'ml' },
+        { id: uid(), group: '', name: 'Gotas de Chocolate', qty: 180, unit: 'g' },
+      ]
+    }],
+    stock: [
+      { id: uid(), name: 'Farinha de Trigo', qty: 2000, unit: 'g', minQty: 400 },
+      { id: uid(), name: 'Sal', qty: 500, unit: 'g', minQty: 50 },
+      { id: uid(), name: 'Fermento Químico', qty: 100, unit: 'g', minQty: 30 },
+      { id: uid(), name: 'Bicarbonato de Sódio', qty: 10, unit: 'g', minQty: 15 },
+      { id: uid(), name: 'Manteiga Sem Sal', qty: 400, unit: 'g', minQty: 100 },
+      { id: uid(), name: 'Açúcar Mascavo', qty: 1000, unit: 'g', minQty: 150 },
+      { id: uid(), name: 'Açúcar Comum', qty: 5000, unit: 'g', minQty: 200 },
+      { id: uid(), name: 'Essência de Baunilha', qty: 30, unit: 'ml', minQty: 10 },
+      { id: uid(), name: 'Gotas de Chocolate', qty: 360, unit: 'g', minQty: 100 },
+    ],
+    prices: [
+      { id: priceIds[0], ingredientName: 'Chocolate em Gotas', store: 'Empório Di Grano', price: 6.99, packageQty: 100, packageUnit: 'g', updatedAt: '2024-02-12' },
+      { id: priceIds[1], ingredientName: 'Fermento Químico', store: 'Bemol Mercado', price: 5.31, packageQty: 100, packageUnit: 'g', updatedAt: '2024-02-14' },
+      { id: priceIds[2], ingredientName: 'Fermento Químico', store: 'DB 24hs', price: 5.29, packageQty: 100, packageUnit: 'g', updatedAt: '2024-02-15' },
+    ]
+  };
+}
+
+async function loadDB(){
+  if(!supabaseClient){
+    showToast('Configure a SUPABASE_URL e a SUPABASE_ANON_KEY no topo do index.html.', true);
+    DB = seedData();
+    LOADED = true;
+    return;
+  }
+  try{
+    const { data, error } = await supabaseClient.from('app_data').select('data').eq('id','default').maybeSingle();
+    if(error) throw error;
+    if(data && data.data){ DB = data.data; }
+    else { DB = seedData(); await saveDB(); }
+  }catch(e){
+    console.error(e);
+    showToast('Não consegui carregar do banco de dados. Verifique sua internet e a configuração do Supabase.', true);
+    DB = seedData();
+  }
+  LOADED = true;
+}
+let saveTimer = null;
+async function saveDB(){
+  if(!supabaseClient) return;
+  try{
+    const { error } = await supabaseClient.from('app_data').upsert({ id: 'default', data: DB, updated_at: new Date().toISOString() });
+    if(error) throw error;
+  }catch(e){
+    console.error(e);
+    showToast('Erro ao salvar no banco de dados.', true);
+  }
+}
+
+/* ---------------- Cost engine ---------------- */
+function findPriceEntries(ingredientName){
+  const n = normName(ingredientName);
+  return DB.prices.filter(p => normName(p.ingredientName) === n || normName(p.ingredientName).includes(n) || n.includes(normName(p.ingredientName)));
+}
+function pricePerBase(entry){
+  const b = toBase(entry.packageQty, entry.packageUnit);
+  if(!b.qty) return null;
+  return { value: entry.price / b.qty, base: b.base };
+}
+function bestPriceFor(ingredientName, neededBase){
+  const entries = findPriceEntries(ingredientName).map(e => ({ e, pb: pricePerBase(e) })).filter(x => x.pb && x.pb.base === neededBase);
+  if(!entries.length) return null;
+  entries.sort((a,b)=>a.pb.value-b.pb.value);
+  return entries[0];
+}
+function computeIngredientCost(ing){
+  const b = toBase(ing.qty, ing.unit);
+  const best = bestPriceFor(ing.name, b.base);
+  if(!best) return { cost: 0, matched: false };
+  return { cost: best.pb.value * b.qty, matched: true, store: best.e.store, unitPrice: best.pb };
+}
+function computeRecipeCost(recipe){
+  let ingredientsCost = 0; let anyUnmatched = false;
+  const lines = recipe.ingredients.map(ing => {
+    const r = computeIngredientCost(ing);
+    ingredientsCost += r.cost;
+    if(!r.matched) anyUnmatched = true;
+    return { ing, ...r };
+  });
+  return { ingredientsCost, anyUnmatched, lines };
+}
+function stockFor(name){
+  const n = normName(name);
+  return DB.stock.find(s => normName(s.name) === n);
+}
+function stockStatus(s){
+  if(!s) return null;
+  if(s.qty <= 0) return 'critical';
+  if(s.minQty && s.qty <= s.minQty) return 'low';
+  return 'ok';
+}
+const STATUS_META = {
+  critical: { label:'Acabando', bg:'bg-critical-bg', text:'text-critical' },
+  low:      { label:'Baixo',    bg:'bg-low-stock-bg', text:'text-low-stock' },
+  ok:       { label:'OK',       bg:'bg-ok-stock-bg',  text:'text-ok-stock' },
+};
+
+/* ---------------- App / view state ---------------- */
+let VIEW = { tab:'recipes', screen:'list', recipeId:null, calcSection:'ingredients', priceQuery:'', stockQuery:'', checked:{} };
+
+function go(patch){ VIEW = { ...VIEW, ...patch }; render(); window.scrollTo(0,0); }
+
+function showToast(msg, isError){
+  const t = document.getElementById('toast');
+  t.innerHTML = `<div class="fade-in ${isError?'bg-error text-on-error':'bg-inverse-surface text-inverse-on-surface'} rounded-lg px-4 py-3 text-body-md text-sm shadow-lg text-center">${msg}</div>`;
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>{ t.innerHTML=''; }, 2200);
+}
+
+/* ---------------- Rendering ---------------- */
+function render(){
+  const app = document.getElementById('app');
+  app.innerHTML = renderView();
+  document.getElementById('bottomnav').innerHTML = renderNav();
+  attachHandlers();
+}
+
+function renderNav(){
+  const items = [
+    { tab:'recipes', icon:'menu_book', label:'Receitas' },
+    { tab:'stock',   icon:'inventory_2', label:'Estoque' },
+    { tab:'prices',  icon:'payments', label:'Preços' },
+  ];
+  return items.map(it => {
+    const active = VIEW.tab === it.tab;
+    return `<button data-action="nav" data-tab="${it.tab}" class="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 ${active?'text-primary':'text-on-surface-variant'}">
+      <span class="material-symbols-outlined" style="${active?"font-variation-settings:'FILL' 1":''}">${it.icon}</span>
+      <span class="text-[11px] font-semibold">${it.label}</span>
+    </button>`;
+  }).join('');
+}
+
+function renderView(){
+  if(!LOADED){
+    return `<div class="flex items-center justify-center h-[70vh] text-on-surface-variant"><span class="material-symbols-outlined animate-spin">progress_activity</span></div>`;
+  }
+  if(VIEW.tab==='recipes'){
+    if(VIEW.screen==='list') return recipesListView();
+    if(VIEW.screen==='form') return recipeFormView();
+    if(VIEW.screen==='detail') return recipeDetailView();
+  }
+  if(VIEW.tab==='stock'){
+    if(VIEW.screen==='form') return stockFormView();
+    return stockListView();
+  }
+  if(VIEW.tab==='prices'){
+    if(VIEW.screen==='form') return priceFormView();
+    return pricesListView();
+  }
+  return '';
+}
+
+/* ----- Header helper ----- */
+function header(title, subtitle, back, rightHtml){
+  return `<header class="sticky top-0 z-30 bg-surface/95 backdrop-blur px-5 pt-6 pb-4 border-b border-outline-variant/60">
+    <div class="flex items-center gap-3">
+      ${back ? `<button data-action="${back}" class="w-9 h-9 -ml-1 rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container"><span class="material-symbols-outlined">arrow_back</span></button>` : ''}
+      <div class="flex-1 min-w-0">
+        <h1 class="text-[22px] leading-tight font-serif font-semibold text-on-surface truncate">${title}</h1>
+        ${subtitle ? `<p class="text-sm text-on-surface-variant mt-0.5">${subtitle}</p>` : ''}
+      </div>
+      ${rightHtml || ''}
+    </div>
+  </header>`;
+}
+
+/* ================= RECEITAS ================= */
+function recipesListView(){
+  return `
+  ${header('Meu Caderno de Receitas', 'Cada receita, do seu jeitinho.')}
+  <div class="px-5 pt-4 space-y-3">
+    ${DB.recipes.length===0 ? emptyState('menu_book','Nenhuma receita ainda','Toque no + para anotar sua primeira receita.') : DB.recipes.map(r=>{
+      const {ingredientsCost} = computeRecipeCost(r);
+      return `<button data-action="open-recipe" data-id="${r.id}" class="w-full text-left bg-surface-container-lowest rounded-xl border border-outline-variant/70 p-4 flex items-center gap-4 active:scale-[0.99] transition">
+        <div class="w-14 h-14 rounded-lg bg-primary-container/20 flex items-center justify-center text-2xl shrink-0">${r.emoji||'🍰'}</div>
+        <div class="flex-1 min-w-0">
+          <p class="font-serif text-lg font-semibold text-on-surface truncate">${r.name}</p>
+          <p class="text-xs text-on-surface-variant mt-0.5">Rendimento: ${r.servings} ${r.sliceWeight?`· ${r.sliceWeight}g/fatia`:''}</p>
+          <p class="text-xs text-primary font-semibold mt-1">Custo dos insumos: ${money(ingredientsCost)}</p>
+        </div>
+        <span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+      </button>`;
+    }).join('')}
+  </div>
+  ${fab('new-recipe')}
+  `;
+}
+
+function emptyState(icon, title, desc){
+  return `<div class="text-center py-16 px-6">
+    <span class="material-symbols-outlined text-5xl text-outline">${icon}</span>
+    <p class="font-serif text-lg text-on-surface mt-3">${title}</p>
+    <p class="text-sm text-on-surface-variant mt-1">${desc}</p>
+  </div>`;
+}
+function fab(action, extra){
+  return `<button data-action="${action}" ${extra||''} class="fixed bottom-24 right-1/2 translate-x-[180px] max-[480px]:right-6 max-[480px]:translate-x-0 w-14 h-14 rounded-full bg-primary text-on-primary shadow-lg flex items-center justify-center active:scale-95 transition z-30">
+    <span class="material-symbols-outlined">add</span>
+  </button>`;
+}
+
+function recipeFormView(){
+  const editing = DB.recipes.find(r=>r.id===VIEW.editId);
+  const r = editing || { emoji:'🍰', name:'', servings:8, sliceWeight:'', laborCost:0, packagingCost:0, taxPercent:0, markup:2.5, steps:[''], ingredients:[{id:uid(),group:'',name:'',qty:'',unit:'g'}] };
+  return `
+  ${header(editing?'Editar Receita':'Nova Receita', null, 'cancel-form')}
+  <form id="recipe-form" class="px-5 pt-4 pb-10 space-y-6">
+    <div class="flex gap-3">
+      <div class="w-16">
+        <label class="text-xs font-semibold text-on-surface-variant">Ícone</label>
+        <input name="emoji" value="${r.emoji||'🍰'}" maxlength="2" class="mt-1 w-full text-center text-2xl rounded-lg border border-outline-variant bg-surface-container-low py-2"/>
+      </div>
+      <div class="flex-1">
+        <label class="text-xs font-semibold text-on-surface-variant">Nome da receita</label>
+        <input name="name" required value="${r.name}" placeholder="Ex: Bolo de Fubá da Vó" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 focus:border-primary focus:ring-primary"/>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs font-semibold text-on-surface-variant">Rendimento (porções/un.)</label>
+        <input name="servings" type="number" min="1" required value="${r.servings}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2"/>
+      </div>
+      <div>
+        <label class="text-xs font-semibold text-on-surface-variant">Peso por fatia (g) — opcional</label>
+        <input name="sliceWeight" type="number" min="0" value="${r.sliceWeight||''}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2"/>
+      </div>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-serif text-base font-semibold">Ingredientes</h3>
+        <button type="button" data-action="add-ing-row" class="text-primary text-xs font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-base">add</span>adicionar</button>
+      </div>
+      <div id="ing-rows" class="space-y-2">
+        ${r.ingredients.map(ing=>ingredientRow(ing)).join('')}
+      </div>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-serif text-base font-semibold">Modo de Preparo</h3>
+        <button type="button" data-action="add-step-row" class="text-primary text-xs font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-base">add</span>passo</button>
+      </div>
+      <div id="step-rows" class="space-y-2">
+        ${r.steps.map((s,i)=>stepRow(s,i)).join('')}
+      </div>
+    </div>
+
+    <div>
+      <h3 class="font-serif text-base font-semibold mb-2">Custos de produção</h3>
+      <div class="grid grid-cols-3 gap-2">
+        <div><label class="text-xs text-on-surface-variant">Mão de obra (R$)</label><input name="laborCost" type="number" step="0.01" min="0" value="${r.laborCost||0}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
+        <div><label class="text-xs text-on-surface-variant">Embalagem (R$)</label><input name="packagingCost" type="number" step="0.01" min="0" value="${r.packagingCost||0}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
+        <div><label class="text-xs text-on-surface-variant">Impostos (%)</label><input name="taxPercent" type="number" step="0.1" min="0" value="${r.taxPercent||0}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
+      </div>
+    </div>
+
+    <button type="submit" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold flex items-center justify-center gap-2">
+      <span class="material-symbols-outlined">favorite</span> Salvar receita
+    </button>
+    ${editing?`<button type="button" data-action="delete-recipe" data-id="${editing.id}" class="w-full text-error rounded-lg py-3 font-semibold text-sm">Excluir receita</button>`:''}
+  </form>`;
+}
+
+function ingredientRow(ing){
+  return `<div class="ing-row bg-surface-container-low rounded-lg p-2.5 flex gap-2 items-start" data-row-id="${ing.id}">
+    <div class="flex-[2] space-y-1">
+      <input name="ing-group" placeholder="Seção (opcional, ex: Secos)" value="${ing.group||''}" class="w-full rounded-md border border-outline-variant/70 bg-surface px-2 py-1.5 text-xs"/>
+      <input name="ing-name" placeholder="Nome do ingrediente" required value="${ing.name||''}" class="w-full rounded-md border border-outline-variant/70 bg-surface px-2 py-1.5 text-sm font-medium"/>
+    </div>
+    <input name="ing-qty" type="number" step="0.01" min="0" placeholder="Qtd" required value="${ing.qty||''}" class="flex-1 w-0 rounded-md border border-outline-variant/70 bg-surface px-2 py-1.5 text-sm"/>
+    <select name="ing-unit" class="flex-1 w-0 rounded-md border border-outline-variant/70 bg-surface px-1 py-1.5 text-sm">
+      ${UNIT_LIST.map(u=>`<option value="${u}" ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+    </select>
+    <button type="button" data-action="remove-row" class="text-outline mt-1"><span class="material-symbols-outlined text-lg">close</span></button>
+  </div>`;
+}
+function stepRow(text, idx){
+  return `<div class="step-row flex gap-2 items-start">
+    <div class="w-6 h-6 mt-2 rounded-full bg-primary-container/30 text-primary text-xs font-bold flex items-center justify-center shrink-0">${idx+1}</div>
+    <textarea name="step-text" rows="2" placeholder="Descreva o passo..." class="flex-1 rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-sm">${text||''}</textarea>
+    <button type="button" data-action="remove-row" class="text-outline mt-2"><span class="material-symbols-outlined text-lg">close</span></button>
+  </div>`;
+}
+
+function recipeDetailView(){
+  const r = DB.recipes.find(x=>x.id===VIEW.recipeId);
+  if(!r) return recipesListView();
+  const sub = `<div class="px-5 pt-3 flex gap-2">
+    <button data-action="calc-section" data-section="ingredients" class="flex-1 py-2 rounded-full text-sm font-semibold ${VIEW.calcSection==='ingredients'?'bg-primary text-on-primary':'bg-surface-container text-on-surface-variant'}">Ingredientes &amp; Modo</button>
+    <button data-action="calc-section" data-section="venda" class="flex-1 py-2 rounded-full text-sm font-semibold ${VIEW.calcSection==='venda'?'bg-primary text-on-primary':'bg-surface-container text-on-surface-variant'}">Preço de Venda</button>
+  </div>`;
+  const rightHtml = `<button data-action="edit-recipe" data-id="${r.id}" class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container"><span class="material-symbols-outlined">edit</span></button>`;
+  return `${header(r.name, `Rendimento: ${r.servings}${r.sliceWeight?` · ${r.sliceWeight}g/fatia`:''}`, 'back-to-list', rightHtml)}
+  ${sub}
+  ${VIEW.calcSection==='ingredients' ? recipeIngredientsSection(r) : recipeSaleCalcSection(r)}`;
+}
+
+function recipeIngredientsSection(r){
+  const groups = {};
+  r.ingredients.forEach(ing=>{ const g = ing.group||'Ingredientes'; groups[g]=groups[g]||[]; groups[g].push(ing); });
+  const groupHtml = Object.entries(groups).map(([g, items])=>`
+    <div class="mb-4">
+      <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-2">${g}</p>
+      <div class="space-y-2">
+        ${items.map(ing=>{
+          const s = stockFor(ing.name);
+          const status = stockStatus(s);
+          const meta = status?STATUS_META[status]:null;
+          const checked = !!VIEW.checked[ing.id];
+          return `<label class="flex items-center gap-3 bg-surface-container-lowest rounded-lg border border-outline-variant/60 px-3 py-2.5">
+            <input type="checkbox" data-action="toggle-check" data-id="${ing.id}" ${checked?'checked':''} class="w-5 h-5 rounded border-outline text-primary focus:ring-primary"/>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-on-surface ${checked?'line-through text-on-surface-variant':''}">${fmtQty(ing.qty,ing.unit)} — ${ing.name}</p>
+              <p class="text-xs text-on-surface-variant">${s? `Estoque: ${fmtQty(s.qty,s.unit)}` : 'Sem estoque cadastrado'}</p>
+            </div>
+            ${meta?`<span class="text-[10px] font-bold px-2 py-1 rounded-full ${meta.bg} ${meta.text}">${meta.label}</span>`:''}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+
+  return `<div class="px-5 pt-4">
+    ${groupHtml}
+    <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-2 mt-2">Modo de Preparo</p>
+    <ol class="space-y-3 mb-6">
+      ${r.steps.map((s,i)=>`<li class="flex gap-3"><div class="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">${i+1}</div><p class="text-sm text-on-surface leading-relaxed pt-0.5">${s}</p></li>`).join('')}
+    </ol>
+    <button data-action="finalize-recipe" data-id="${r.id}" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold flex items-center justify-center gap-2 mb-2">
+      <span class="material-symbols-outlined">check_circle</span> Finalizar Receita
+    </button>
+    <p class="text-xs text-on-surface-variant text-center pb-6">Isso descontará os ingredientes do seu estoque automaticamente.</p>
+  </div>`;
+}
+
+function recipeSaleCalcSection(r){
+  const { ingredientsCost, lines, anyUnmatched } = computeRecipeCost(r);
+  const labor = Number(r.laborCost)||0, pack = Number(r.packagingCost)||0, tax = Number(r.taxPercent)||0, markup = Number(r.markup)||2;
+  const costTotal = ingredientsCost + labor + pack;
+  const finalPrice = ingredientsCost * markup;
+  const taxAmount = finalPrice * (tax/100);
+  const netProfit = finalPrice - costTotal - taxAmount;
+  const perSlice = r.sliceWeight && r.servings ? finalPrice / r.servings : null;
+  const costPerServing = r.servings ? costTotal / r.servings : 0;
+
+  return `<div class="px-5 pt-4 pb-10">
+    <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/60 p-4 mb-4">
+      <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-3">Custo dos ingredientes</p>
+      <div class="space-y-2">
+        ${lines.map(l=>`<div class="flex items-center justify-between text-sm">
+          <div class="min-w-0 flex-1">
+            <p class="text-on-surface font-medium truncate">${l.ing.name}</p>
+            <p class="text-xs text-on-surface-variant">${fmtQty(l.ing.qty,l.ing.unit)} ${l.matched?`· menor preço em ${l.store}`:'· sem preço cadastrado'}</p>
+          </div>
+          <p class="font-semibold ${l.matched?'text-on-surface':'text-outline'}">${money(l.cost)}</p>
+        </div>`).join('')}
+      </div>
+      <div class="border-t border-outline-variant/60 mt-3 pt-3 flex justify-between text-sm font-bold">
+        <span>Total Insumos</span><span>${money(ingredientsCost)}</span>
+      </div>
+      ${anyUnmatched?`<p class="text-xs text-secondary mt-2">Algum ingrediente ainda não tem preço na aba Preços — cadastre para um cálculo mais exato.</p>`:''}
+    </div>
+
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      <div><label class="text-xs text-on-surface-variant">Mão de obra</label><input data-field="laborCost" type="number" step="0.01" min="0" value="${labor}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
+      <div><label class="text-xs text-on-surface-variant">Embalagem</label><input data-field="packagingCost" type="number" step="0.01" min="0" value="${pack}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
+      <div><label class="text-xs text-on-surface-variant">Impostos (%)</label><input data-field="taxPercent" type="number" step="0.1" min="0" value="${tax}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
+    </div>
+
+    <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-2">Sugestões de preço (sobre o custo dos insumos)</p>
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      ${[{l:'Margem 30%',f:1.3},{l:'Markup 2x',f:2},{l:'Markup 3x',f:3}].map(o=>`
+        <button data-action="apply-markup" data-value="${o.f}" class="bg-surface-container rounded-lg py-2.5 text-center border ${Math.abs(markup-o.f)<0.001?'border-primary bg-primary-container/15':'border-outline-variant/60'}">
+          <p class="text-[11px] text-on-surface-variant">${o.l}</p>
+          <p class="text-sm font-bold text-on-surface">${money(ingredientsCost*o.f)}</p>
+        </button>`).join('')}
+    </div>
+
+    <div class="mb-5">
+      <div class="flex justify-between text-xs text-on-surface-variant mb-1">
+        <span>Ajuste fino de markup</span><span class="font-bold text-primary">${markup.toFixed(1)}x</span>
+      </div>
+      <input data-field="markup" type="range" min="1" max="5" step="0.1" value="${markup}" class="w-full"/>
+    </div>
+
+    <div class="bg-primary text-on-primary rounded-xl p-5 text-center mb-4">
+      <p class="text-xs uppercase tracking-wide opacity-80">Preço final de venda sugerido</p>
+      <p class="font-serif text-4xl font-bold mt-1">${money(finalPrice)}</p>
+      ${perSlice?`<p class="text-xs opacity-80 mt-1">≈ ${money(perSlice)} por porção</p>`:''}
+    </div>
+
+    <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/60 p-4 space-y-1.5 text-sm mb-6">
+      <div class="flex justify-between"><span class="text-on-surface-variant">Insumos</span><span>${money(ingredientsCost)}</span></div>
+      <div class="flex justify-between"><span class="text-on-surface-variant">Mão de obra</span><span>${money(labor)}</span></div>
+      <div class="flex justify-between"><span class="text-on-surface-variant">Embalagem</span><span>${money(pack)}</span></div>
+      <div class="flex justify-between"><span class="text-on-surface-variant">Impostos (${tax}%)</span><span>${money(taxAmount)}</span></div>
+      <div class="flex justify-between border-t border-outline-variant/60 pt-1.5 mt-1.5"><span class="text-on-surface-variant">Custo por porção</span><span>${money(costPerServing)}</span></div>
+      <div class="flex justify-between font-bold text-primary"><span>Lucro líquido estimado</span><span>${money(netProfit)}</span></div>
+    </div>
+
+    <button data-action="save-calc" data-id="${r.id}" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold flex items-center justify-center gap-2">
+      <span class="material-symbols-outlined">save</span> Salvar cálculo na receita
+    </button>
+  </div>`;
+}
+
+/* ================= ESTOQUE ================= */
+function stockListView(){
+  const q = normName(VIEW.stockQuery);
+  const items = DB.stock.filter(s=>!q || normName(s.name).includes(q)).sort((a,b)=>{
+    const order = {critical:0, low:1, ok:2};
+    return order[stockStatus(a)] - order[stockStatus(b)] || a.name.localeCompare(b.name);
+  });
+  const rightHtml = '';
+  return `${header('Meu Estoque','O que tem na despensa hoje.', null, rightHtml)}
+  <div class="px-5 pt-4">
+    <div class="relative mb-4">
+      <span class="material-symbols-outlined absolute left-3 top-2.5 text-outline">search</span>
+      <input id="stock-search" value="${VIEW.stockQuery}" placeholder="Buscar ingrediente..." class="w-full rounded-full border border-outline-variant bg-surface-container-low pl-10 pr-4 py-2.5 text-sm"/>
+    </div>
+    ${items.length===0?emptyState('inventory_2','Nenhum item no estoque','Toque no + para adicionar seus ingredientes.'):`<div class="space-y-2">
+      ${items.map(s=>{
+        const status = stockStatus(s); const meta = STATUS_META[status];
+        return `<div class="bg-surface-container-lowest rounded-lg border border-outline-variant/60 p-3 flex items-center gap-3">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-on-surface truncate">${s.name}</p>
+            <p class="text-xs text-on-surface-variant">${fmtQty(s.qty,s.unit)} ${s.minQty?`· mínimo ${fmtQty(s.minQty,s.unit)}`:''}</p>
+          </div>
+          <span class="text-[10px] font-bold px-2 py-1 rounded-full ${meta.bg} ${meta.text} shrink-0">${meta.label}</span>
+          <button data-action="edit-stock" data-id="${s.id}" class="text-on-surface-variant"><span class="material-symbols-outlined text-lg">edit</span></button>
+        </div>`;
+      }).join('')}
+    </div>`}
+  </div>
+  ${fab('new-stock')}`;
+}
+
+function stockFormView(){
+  const editing = DB.stock.find(s=>s.id===VIEW.editId);
+  const s = editing || {name:'', qty:'', unit:'g', minQty:''};
+  return `${header(editing?'Editar Item':'Novo Item de Estoque', null, 'back-stock')}
+  <form id="stock-form" class="px-5 pt-4 pb-10 space-y-4">
+    <div>
+      <label class="text-xs font-semibold text-on-surface-variant">Nome do ingrediente</label>
+      <input name="name" required value="${s.name}" placeholder="Ex: Farinha de Trigo" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div><label class="text-xs font-semibold text-on-surface-variant">Quantidade total</label><input name="qty" type="number" step="0.01" min="0" required value="${s.qty}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/></div>
+      <div><label class="text-xs font-semibold text-on-surface-variant">Unidade</label>
+        <select name="unit" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5">${UNIT_LIST.map(u=>`<option value="${u}" ${s.unit===u?'selected':''}>${u}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs font-semibold text-on-surface-variant">Estoque mínimo (avisa quando ficar baixo) — opcional</label>
+      <input name="minQty" type="number" step="0.01" min="0" value="${s.minQty||''}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
+    </div>
+    <button type="submit" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold">Salvar</button>
+    ${editing?`<button type="button" data-action="delete-stock" data-id="${editing.id}" class="w-full text-error rounded-lg py-3 font-semibold text-sm">Remover item</button>`:''}
+  </form>`;
+}
+
+/* ================= PREÇOS ================= */
+function pricesListView(){
+  const q = normName(VIEW.priceQuery);
+  const filtered = DB.prices.filter(p=>!q || normName(p.ingredientName).includes(q));
+  const groups = {};
+  filtered.forEach(p=>{ groups[p.ingredientName]=groups[p.ingredientName]||[]; groups[p.ingredientName].push(p); });
+
+  const groupsHtml = Object.entries(groups).map(([name, entries])=>{
+    const withPb = entries.map(e=>({e, pb: pricePerBase(e)})).sort((a,b)=> (a.pb?a.pb.value:9e9) - (b.pb?b.pb.value:9e9));
+    const cheapestId = withPb[0] && withPb[0].e.id;
+    return `<div class="mb-4">
+      <p class="font-serif text-base font-semibold text-on-surface mb-2">${name}</p>
+      <div class="space-y-2">
+        ${withPb.map(({e,pb})=>{
+          const isBest = e.id===cheapestId;
+          const per100 = pb ? (pb.base==='un' ? `${money(pb.value)}/un` : `${money(pb.value*100)} / 100${pb.base}`) : '';
+          return `<button data-action="edit-price" data-id="${e.id}" class="w-full text-left ${isBest?'bg-ok-stock-bg/70 border-ok-stock/40':'bg-surface-container-lowest border-outline-variant/60'} border rounded-lg p-3 flex items-center gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-1.5">
+                <p class="text-sm font-semibold text-on-surface truncate">${e.store}</p>
+                ${isBest?'<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-ok-stock text-white shrink-0">Melhor preço</span>':''}
+              </div>
+              <p class="text-xs text-on-surface-variant">Atualizado em ${fmtDate(e.updatedAt)} ${per100?`· ${per100}`:''}</p>
+            </div>
+            <p class="font-serif text-lg font-bold text-on-surface shrink-0">${money(e.price)}<span class="text-xs font-sans font-normal text-on-surface-variant"> /${fmtQty(e.packageQty,e.packageUnit)}</span></p>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `${header('Meus Preços','Pesquisas de preço por ingrediente.')}
+  <div class="px-5 pt-4">
+    <div class="relative mb-4">
+      <span class="material-symbols-outlined absolute left-3 top-2.5 text-outline">search</span>
+      <input id="price-search" value="${VIEW.priceQuery}" placeholder='Buscar, ex: "farinha de trigo"' class="w-full rounded-full border border-outline-variant bg-surface-container-low pl-10 pr-4 py-2.5 text-sm"/>
+    </div>
+    ${filtered.length===0?emptyState('payments','Nenhum preço encontrado','Anote os preços que você pesquisa pelo mercado.'):groupsHtml}
+  </div>
+  ${fab('new-price')}`;
+}
+
+function priceFormView(){
+  const editing = DB.prices.find(p=>p.id===VIEW.editId);
+  const p = editing || { ingredientName:'', store:'', price:'', packageQty:100, packageUnit:'g', updatedAt: todayISO() };
+  const names = [...new Set(DB.prices.map(x=>x.ingredientName))];
+  return `${header(editing?'Editar Preço':'Novo Preço', null, 'back-prices')}
+  <form id="price-form" class="px-5 pt-4 pb-10 space-y-4">
+    <div>
+      <label class="text-xs font-semibold text-on-surface-variant">Ingrediente</label>
+      <input name="ingredientName" list="ing-names" required value="${p.ingredientName}" placeholder="Ex: Farinha de Trigo" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
+      <datalist id="ing-names">${names.map(n=>`<option value="${n}">`).join('')}</datalist>
+    </div>
+    <div>
+      <label class="text-xs font-semibold text-on-surface-variant">Local / Loja</label>
+      <input name="store" required value="${p.store}" placeholder="Ex: Bemol Mercado" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div class="col-span-1"><label class="text-xs font-semibold text-on-surface-variant">Preço (R$)</label><input name="price" type="number" step="0.01" min="0" required value="${p.price}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/></div>
+      <div class="col-span-1"><label class="text-xs font-semibold text-on-surface-variant">Para cada</label><input name="packageQty" type="number" step="0.01" min="0" required value="${p.packageQty}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/></div>
+      <div class="col-span-1"><label class="text-xs font-semibold text-on-surface-variant">Unidade</label>
+        <select name="packageUnit" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5">${UNIT_LIST.map(u=>`<option value="${u}" ${p.packageUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs font-semibold text-on-surface-variant">Atualizado em</label>
+      <input name="updatedAt" type="date" value="${p.updatedAt}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
+    </div>
+    <button type="submit" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold">Salvar preço</button>
+    ${editing?`<button type="button" data-action="delete-price" data-id="${editing.id}" class="w-full text-error rounded-lg py-3 font-semibold text-sm">Remover</button>`:''}
+  </form>`;
+}
+
+/* ---------------- Event handling ---------------- */
+function attachHandlers(){
+  const app = document.getElementById('app');
+  const nav = document.getElementById('bottomnav');
+
+  nav.onclick = (e)=>{
+    const btn = e.target.closest('[data-action="nav"]');
+    if(!btn) return;
+    const tab = btn.dataset.tab;
+    go({ tab, screen: tab==='recipes'?'list':'list' });
+  };
+
+  app.addEventListener('click', onAppClick);
+  app.addEventListener('submit', onAppSubmit);
+  app.addEventListener('input', onAppInput);
+  app.addEventListener('change', onAppChange);
+}
+
+function onAppClick(e){
+  const t = e.target.closest('[data-action]');
+  if(!t) return;
+  const action = t.dataset.action;
+
+  if(action==='new-recipe'){ VIEW.editId=null; go({tab:'recipes', screen:'form'}); }
+  else if(action==='edit-recipe'){ VIEW.editId=t.dataset.id; go({tab:'recipes', screen:'form'}); }
+  else if(action==='cancel-form'){ go({tab:'recipes', screen: VIEW.editId? 'detail':'list', recipeId: VIEW.editId||VIEW.recipeId}); }
+  else if(action==='open-recipe'){ go({tab:'recipes', screen:'detail', recipeId:t.dataset.id, calcSection:'ingredients', checked:{}}); }
+  else if(action==='back-to-list'){ go({tab:'recipes', screen:'list'}); }
+  else if(action==='calc-section'){ go({calcSection:t.dataset.section}); }
+  else if(action==='toggle-check'){ VIEW.checked[t.dataset.id] = t.checked; }
+  else if(action==='delete-recipe'){
+    if(confirm('Tem certeza que deseja excluir esta receita?')){
+      DB.recipes = DB.recipes.filter(r=>r.id!==t.dataset.id); saveDB(); go({tab:'recipes', screen:'list'}); showToast('Receita excluída.');
+    }
+  }
+  else if(action==='add-ing-row'){ document.getElementById('ing-rows').insertAdjacentHTML('beforeend', ingredientRow({id:uid(),group:'',name:'',qty:'',unit:'g'})); }
+  else if(action==='add-step-row'){ const rows=document.getElementById('step-rows'); rows.insertAdjacentHTML('beforeend', stepRow('', rows.children.length)); }
+  else if(action==='remove-row'){ t.closest('.ing-row,.step-row').remove(); }
+  else if(action==='finalize-recipe'){ finalizeRecipe(t.dataset.id); }
+  else if(action==='apply-markup'){ setRecipeField(VIEW.recipeId, 'markup', parseFloat(t.dataset.value)); render(); }
+  else if(action==='save-calc'){ saveDB(); showToast('Cálculo salvo na receita! 💚'); }
+
+  else if(action==='new-stock'){ VIEW.editId=null; go({tab:'stock', screen:'form'}); }
+  else if(action==='edit-stock'){ VIEW.editId=t.dataset.id; go({tab:'stock', screen:'form'}); }
+  else if(action==='back-stock'){ go({tab:'stock', screen:'list'}); }
+  else if(action==='delete-stock'){
+    if(confirm('Remover este item do estoque?')){ DB.stock = DB.stock.filter(s=>s.id!==t.dataset.id); saveDB(); go({tab:'stock', screen:'list'}); showToast('Item removido.'); }
+  }
+
+  else if(action==='new-price'){ VIEW.editId=null; go({tab:'prices', screen:'form'}); }
+  else if(action==='edit-price'){ VIEW.editId=t.dataset.id; go({tab:'prices', screen:'form'}); }
+  else if(action==='back-prices'){ go({tab:'prices', screen:'list'}); }
+  else if(action==='delete-price'){
+    if(confirm('Remover este preço?')){ DB.prices = DB.prices.filter(p=>p.id!==t.dataset.id); saveDB(); go({tab:'prices', screen:'list'}); showToast('Preço removido.'); }
+  }
+}
+
+function onAppInput(e){
+  if(e.target.id==='stock-search'){ VIEW.stockQuery = e.target.value; renderKeepFocus('stock-search'); }
+  if(e.target.id==='price-search'){ VIEW.priceQuery = e.target.value; renderKeepFocus('price-search'); }
+  if(e.target.dataset.field && VIEW.tab==='recipes' && VIEW.screen==='detail'){
+    const field = e.target.dataset.field;
+    const val = parseFloat(e.target.value)||0;
+    setRecipeField(VIEW.recipeId, field, val);
+    if(field==='markup'){
+      // live-update just the price/slider label without full rerender jank
+      render();
+    }
+  }
+}
+function onAppChange(e){
+  if(e.target.dataset.field){
+    const field = e.target.dataset.field;
+    const val = parseFloat(e.target.value)||0;
+    setRecipeField(VIEW.recipeId, field, val);
+    saveDB();
+  }
+}
+function renderKeepFocus(id){
+  render();
+  const el = document.getElementById(id);
+  if(el){ el.focus(); const v=el.value; el.value=''; el.value=v; }
+}
+
+function setRecipeField(id, field, val){
+  const r = DB.recipes.find(x=>x.id===id);
+  if(r) r[field] = val;
+}
+
+function onAppSubmit(e){
+  e.preventDefault();
+  if(e.target.id==='recipe-form') return submitRecipeForm(e.target);
+  if(e.target.id==='stock-form') return submitStockForm(e.target);
+  if(e.target.id==='price-form') return submitPriceForm(e.target);
+}
+
+function submitRecipeForm(form){
+  const fd = new FormData(form);
+  const ingRows = [...form.querySelectorAll('.ing-row')];
+  const ingredients = ingRows.map(row=>({
+    id: row.dataset.rowId || uid(),
+    group: row.querySelector('[name=ing-group]').value.trim(),
+    name: capitalize(row.querySelector('[name=ing-name]').value.trim()),
+    qty: parseFloat(row.querySelector('[name=ing-qty]').value)||0,
+    unit: row.querySelector('[name=ing-unit]').value,
+  })).filter(i=>i.name);
+  const stepRows = [...form.querySelectorAll('.step-row textarea')];
+  const steps = stepRows.map(s=>s.value.trim()).filter(Boolean);
+
+  const data = {
+    emoji: fd.get('emoji')||'🍰',
+    name: fd.get('name').trim(),
+    servings: parseInt(fd.get('servings'))||1,
+    sliceWeight: fd.get('sliceWeight')?parseFloat(fd.get('sliceWeight')):null,
+    laborCost: parseFloat(fd.get('laborCost'))||0,
+    packagingCost: parseFloat(fd.get('packagingCost'))||0,
+    taxPercent: parseFloat(fd.get('taxPercent'))||0,
+    ingredients, steps,
+  };
+  if(VIEW.editId){
+    const r = DB.recipes.find(x=>x.id===VIEW.editId);
+    Object.assign(r, data);
+    saveDB(); showToast('Receita atualizada! 💚'); go({tab:'recipes', screen:'detail', recipeId:r.id, calcSection:'ingredients'});
+  } else {
+    const r = { id: uid(), markup: 2.5, ...data };
+    DB.recipes.push(r);
+    saveDB(); showToast('Receita salva com carinho! 💚'); go({tab:'recipes', screen:'detail', recipeId:r.id, calcSection:'ingredients', checked:{}});
+  }
+}
+
+function submitStockForm(form){
+  const fd = new FormData(form);
+  const data = { name: capitalize(fd.get('name').trim()), qty: parseFloat(fd.get('qty'))||0, unit: fd.get('unit'), minQty: fd.get('minQty')?parseFloat(fd.get('minQty')):0 };
+  if(VIEW.editId){
+    Object.assign(DB.stock.find(s=>s.id===VIEW.editId), data);
+    showToast('Estoque atualizado!');
+  } else {
+    DB.stock.push({ id: uid(), ...data });
+    showToast('Item adicionado ao estoque!');
+  }
+  saveDB(); go({tab:'stock', screen:'list'});
+}
+
+function submitPriceForm(form){
+  const fd = new FormData(form);
+  const data = {
+    ingredientName: capitalize(fd.get('ingredientName').trim()),
+    store: fd.get('store').trim(),
+    price: parseFloat(fd.get('price'))||0,
+    packageQty: parseFloat(fd.get('packageQty'))||1,
+    packageUnit: fd.get('packageUnit'),
+    updatedAt: fd.get('updatedAt') || todayISO(),
+  };
+  if(VIEW.editId){
+    Object.assign(DB.prices.find(p=>p.id===VIEW.editId), data);
+    showToast('Preço atualizado!');
+  } else {
+    DB.prices.push({ id: uid(), ...data });
+    showToast('Preço anotado!');
+  }
+  saveDB(); go({tab:'prices', screen:'list'});
+}
+
+function finalizeRecipe(recipeId){
+  const r = DB.recipes.find(x=>x.id===recipeId);
+  if(!r) return;
+  let warnings = [];
+  r.ingredients.forEach(ing=>{
+    const s = stockFor(ing.name);
+    if(!s){ warnings.push(`${ing.name} (sem estoque cadastrado)`); return; }
+    const need = toBase(ing.qty, ing.unit);
+    const have = toBase(s.qty, s.unit);
+    if(need.base !== have.base){ warnings.push(`${ing.name} (unidade incompatível)`); return; }
+    const newQtyBase = Math.max(0, have.qty - need.qty);
+    if(have.qty < need.qty) warnings.push(`${ing.name} (estoque insuficiente)`);
+    // convert back to stock's original unit
+    const factor = UNITS[s.unit].factor;
+    s.qty = Math.round((newQtyBase/factor)*1000)/1000;
+  });
+  saveDB();
+  VIEW.checked = {};
+  render();
+  if(warnings.length){
+    showToast(`Receita feita! Atenção: ${warnings.join(', ')}.`, true);
+  } else {
+    showToast('Receita feita com carinho! Estoque atualizado. 💚');
+  }
+}
+
+/* ---------------- Init ---------------- */
+(async function init(){
+  render();
+  await loadDB();
+  render();
+})();
+</script>
+</body>
+</html>
