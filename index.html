@@ -70,8 +70,8 @@
    2. Rode o arquivo supabase-schema.sql no "SQL Editor" do projeto
    3. Em Project Settings > API, copie a "Project URL" e a chave "anon public"
    4. Cole as duas abaixo. */
-const SUPABASE_URL = "https://ttysjnktbvzuddyxtlpf.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_vZqF9fHVbFEVU5_UWTWIOg_4pzfIvuC";
+const SUPABASE_URL = "COLE_AQUI_A_URL_DO_SEU_PROJETO_SUPABASE";
+const SUPABASE_ANON_KEY = "COLE_AQUI_A_CHAVE_ANON_PUBLIC";
 const supabaseClient = (SUPABASE_URL.startsWith('http'))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
@@ -83,8 +83,9 @@ const UNITS = {
   ml: { base:'ml', factor:1,    label:'ml' },
   l:  { base:'ml', factor:1000, label:'l'  },
   un: { base:'un', factor:1,    label:'un' },
+  gotas: { base:'gotas', factor:1, label:'gotas' },
 };
-const UNIT_LIST = ['g','kg','ml','l','un'];
+const UNIT_LIST = ['g','kg','ml','l','un','gotas'];
 
 function toBase(qty, unit){
   const u = UNITS[unit] || UNITS.g;
@@ -621,7 +622,7 @@ function pricesListView(){
                 <p class="text-sm font-semibold text-on-surface truncate">${e.store}</p>
                 ${isBest?'<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-ok-stock text-white shrink-0">Melhor preço</span>':''}
               </div>
-              <p class="text-xs text-on-surface-variant">Atualizado em ${fmtDate(e.updatedAt)} ${per100?`· ${per100}`:''}</p>
+              <p class="text-xs text-on-surface-variant">${e.brand?`${e.brand} · `:''}Atualizado em ${fmtDate(e.updatedAt)} ${per100?`· ${per100}`:''}</p>
             </div>
             <p class="font-serif text-lg font-bold text-on-surface shrink-0">${money(e.price)}<span class="text-xs font-sans font-normal text-on-surface-variant"> /${fmtQty(e.packageQty,e.packageUnit)}</span></p>
           </button>`;
@@ -643,14 +644,19 @@ function pricesListView(){
 
 function priceFormView(){
   const editing = DB.prices.find(p=>p.id===VIEW.editId);
-  const p = editing || { ingredientName:'', store:'', price:'', packageQty:100, packageUnit:'g', updatedAt: todayISO() };
+  const p = editing || { ingredientName:'', brand:'', store:'', price:'', packageQty:100, packageUnit:'g', updatedAt: todayISO() };
   const names = [...new Set(DB.prices.map(x=>x.ingredientName))];
   return `${header(editing?'Editar Preço':'Novo Preço', null, 'back-prices')}
   <form id="price-form" class="px-5 pt-4 pb-10 space-y-4">
     <div>
       <label class="text-xs font-semibold text-on-surface-variant">Ingrediente</label>
       <input name="ingredientName" list="ing-names" required value="${p.ingredientName}" placeholder="Ex: Farinha de Trigo" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
+      <p class="text-[11px] text-on-surface-variant mt-1">Use sempre o mesmo nome pra esse ingrediente (sem marca), assim o app compara certinho os preços entre lugares.</p>
       <datalist id="ing-names">${names.map(n=>`<option value="${n}">`).join('')}</datalist>
+    </div>
+    <div>
+      <label class="text-xs font-semibold text-on-surface-variant">Marca / observação (opcional)</label>
+      <input name="brand" value="${p.brand||''}" placeholder="Ex: União, integral, orgânico..." class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
     </div>
     <div>
       <label class="text-xs font-semibold text-on-surface-variant">Local / Loja</label>
@@ -819,6 +825,7 @@ function submitPriceForm(form){
   const fd = new FormData(form);
   const data = {
     ingredientName: capitalize(fd.get('ingredientName').trim()),
+    brand: fd.get('brand').trim(),
     store: fd.get('store').trim(),
     price: parseFloat(fd.get('price'))||0,
     packageQty: parseFloat(fd.get('packageQty'))||1,
