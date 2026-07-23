@@ -118,7 +118,6 @@ function seedData(){
     recipes: [{
       id: uid(), emoji: '🍪', name: 'Cookies de Gotas de Chocolate',
       servings: 12, sliceWeight: 60,
-      laborCost: 15, packagingCost: 5, taxPercent: 6, markup: 3,
       steps: [
         'Separar os ingredientes secos em uma tigela.',
         'Separar os ingredientes molhados.',
@@ -206,7 +205,7 @@ function stockFor(name){
 }
 function stockUnitCost(s){
   if(!s || !s.purchasePrice || !s.purchaseQty) return null;
-  const b = toBase(s.purchaseQty, s.unit);
+  const b = toBase(s.purchaseQty, s.purchaseUnit || s.unit);
   if(!b.qty) return null;
   return { value: s.purchasePrice / b.qty, base: b.base };
 }
@@ -242,7 +241,7 @@ const STATUS_META = {
 };
 
 /* ---------------- App / view state ---------------- */
-let VIEW = { tab:'recipes', screen:'list', recipeId:null, calcSection:'ingredients', priceQuery:'', stockQuery:'', checked:{} };
+let VIEW = { tab:'recipes', screen:'list', recipeId:null, priceQuery:'', stockQuery:'', checked:{} };
 
 function go(patch){ VIEW = { ...VIEW, ...patch }; render(); window.scrollTo(0,0); }
 
@@ -347,7 +346,7 @@ function fab(action, extra){
 
 function recipeFormView(){
   const editing = DB.recipes.find(r=>r.id===VIEW.editId);
-  const r = editing || { emoji:'🍰', name:'', servings:8, sliceWeight:'', laborCost:0, packagingCost:0, taxPercent:0, markup:2.5, steps:[''], ingredients:[{id:uid(),group:'',name:'',qty:'',unit:'g'}] };
+  const r = editing || { emoji:'🍰', name:'', servings:8, sliceWeight:'', steps:[''], ingredients:[{id:uid(),group:'',name:'',qty:'',unit:'g'}] };
   return `
   ${header(editing?'Editar Receita':'Nova Receita', null, 'cancel-form')}
   <form id="recipe-form" class="px-5 pt-4 pb-10 space-y-6">
@@ -392,15 +391,6 @@ function recipeFormView(){
       </div>
     </div>
 
-    <div>
-      <h3 class="font-serif text-base font-semibold mb-2">Custos de produção</h3>
-      <div class="grid grid-cols-3 gap-2">
-        <div><label class="text-xs text-on-surface-variant">Mão de obra (R$)</label><input name="laborCost" type="number" step="0.01" min="0" value="${r.laborCost||0}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
-        <div><label class="text-xs text-on-surface-variant">Embalagem (R$)</label><input name="packagingCost" type="number" step="0.01" min="0" value="${r.packagingCost||0}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
-        <div><label class="text-xs text-on-surface-variant">Impostos (%)</label><input name="taxPercent" type="number" step="0.1" min="0" value="${r.taxPercent||0}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
-      </div>
-    </div>
-
     <button type="submit" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold flex items-center justify-center gap-2">
       <span class="material-symbols-outlined">favorite</span> Salvar receita
     </button>
@@ -432,14 +422,9 @@ function stepRow(text, idx){
 function recipeDetailView(){
   const r = DB.recipes.find(x=>x.id===VIEW.recipeId);
   if(!r) return recipesListView();
-  const sub = `<div class="px-5 pt-3 flex gap-2">
-    <button data-action="calc-section" data-section="ingredients" class="flex-1 py-2 rounded-full text-sm font-semibold ${VIEW.calcSection==='ingredients'?'bg-primary text-on-primary':'bg-surface-container text-on-surface-variant'}">Ingredientes &amp; Modo</button>
-    <button data-action="calc-section" data-section="venda" class="flex-1 py-2 rounded-full text-sm font-semibold ${VIEW.calcSection==='venda'?'bg-primary text-on-primary':'bg-surface-container text-on-surface-variant'}">Preço de Venda</button>
-  </div>`;
   const rightHtml = `<button data-action="edit-recipe" data-id="${r.id}" class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container"><span class="material-symbols-outlined">edit</span></button>`;
   return `${header(r.name, `Rendimento: ${r.servings}${r.sliceWeight?` · ${r.sliceWeight}g/fatia`:''}`, 'back-to-list', rightHtml)}
-  ${sub}
-  ${VIEW.calcSection==='ingredients' ? recipeIngredientsSection(r) : recipeSaleCalcSection(r)}`;
+  ${recipeIngredientsSection(r)}`;
 }
 
 function recipeIngredientsSection(r){
@@ -479,77 +464,6 @@ function recipeIngredientsSection(r){
   </div>`;
 }
 
-function recipeSaleCalcSection(r){
-  const { ingredientsCost, lines, anyUnmatched } = computeRecipeCost(r);
-  const labor = Number(r.laborCost)||0, pack = Number(r.packagingCost)||0, tax = Number(r.taxPercent)||0, markup = Number(r.markup)||2;
-  const costTotal = ingredientsCost + labor + pack;
-  const finalPrice = ingredientsCost * markup;
-  const taxAmount = finalPrice * (tax/100);
-  const netProfit = finalPrice - costTotal - taxAmount;
-  const perSlice = r.sliceWeight && r.servings ? finalPrice / r.servings : null;
-  const costPerServing = r.servings ? costTotal / r.servings : 0;
-
-  return `<div class="px-5 pt-4 pb-10">
-    <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/60 p-4 mb-4">
-      <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-3">Custo dos ingredientes</p>
-      <div class="space-y-2">
-        ${lines.map(l=>`<div class="flex items-center justify-between text-sm">
-          <div class="min-w-0 flex-1">
-            <p class="text-on-surface font-medium truncate">${l.ing.name}</p>
-            <p class="text-xs text-on-surface-variant">${fmtQty(l.ing.qty,l.ing.unit)} ${l.matched?'· baseado na compra cadastrada no Estoque':(l.reason==='sem-estoque'?'· ingrediente sem item no Estoque':(l.reason==='unidade-incompativel'?'· unidade do Estoque não bate com a da receita':'· falta cadastrar valor pago no Estoque'))}</p>
-          </div>
-          <p class="font-semibold ${l.matched?'text-on-surface':'text-outline'}">${money(l.cost)}</p>
-        </div>`).join('')}
-      </div>
-      <div class="border-t border-outline-variant/60 mt-3 pt-3 flex justify-between text-sm font-bold">
-        <span>Total Insumos</span><span>${money(ingredientsCost)}</span>
-      </div>
-      ${anyUnmatched?`<p class="text-xs text-secondary mt-2">Algum ingrediente ainda não tem o valor pago cadastrado no Estoque — edite o item lá pra esse cálculo ficar completo.</p>`:''}
-    </div>
-
-    <div class="grid grid-cols-3 gap-2 mb-4">
-      <div><label class="text-xs text-on-surface-variant">Mão de obra</label><input data-field="laborCost" type="number" step="0.01" min="0" value="${labor}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
-      <div><label class="text-xs text-on-surface-variant">Embalagem</label><input data-field="packagingCost" type="number" step="0.01" min="0" value="${pack}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
-      <div><label class="text-xs text-on-surface-variant">Impostos (%)</label><input data-field="taxPercent" type="number" step="0.1" min="0" value="${tax}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-2 py-2 text-sm"/></div>
-    </div>
-
-    <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-2">Sugestões de preço (sobre o custo dos insumos)</p>
-    <div class="grid grid-cols-3 gap-2 mb-4">
-      ${[{l:'Margem 30%',f:1.3},{l:'Markup 2x',f:2},{l:'Markup 3x',f:3}].map(o=>`
-        <button data-action="apply-markup" data-value="${o.f}" class="bg-surface-container rounded-lg py-2.5 text-center border ${Math.abs(markup-o.f)<0.001?'border-primary bg-primary-container/15':'border-outline-variant/60'}">
-          <p class="text-[11px] text-on-surface-variant">${o.l}</p>
-          <p class="text-sm font-bold text-on-surface">${money(ingredientsCost*o.f)}</p>
-        </button>`).join('')}
-    </div>
-
-    <div class="mb-5">
-      <div class="flex justify-between text-xs text-on-surface-variant mb-1">
-        <span>Ajuste fino de markup</span><span class="font-bold text-primary">${markup.toFixed(1)}x</span>
-      </div>
-      <input data-field="markup" type="range" min="1" max="5" step="0.1" value="${markup}" class="w-full"/>
-    </div>
-
-    <div class="bg-primary text-on-primary rounded-xl p-5 text-center mb-4">
-      <p class="text-xs uppercase tracking-wide opacity-80">Preço final de venda sugerido</p>
-      <p class="font-serif text-4xl font-bold mt-1">${money(finalPrice)}</p>
-      ${perSlice?`<p class="text-xs opacity-80 mt-1">≈ ${money(perSlice)} por porção</p>`:''}
-    </div>
-
-    <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/60 p-4 space-y-1.5 text-sm mb-6">
-      <div class="flex justify-between"><span class="text-on-surface-variant">Insumos</span><span>${money(ingredientsCost)}</span></div>
-      <div class="flex justify-between"><span class="text-on-surface-variant">Mão de obra</span><span>${money(labor)}</span></div>
-      <div class="flex justify-between"><span class="text-on-surface-variant">Embalagem</span><span>${money(pack)}</span></div>
-      <div class="flex justify-between"><span class="text-on-surface-variant">Impostos (${tax}%)</span><span>${money(taxAmount)}</span></div>
-      <div class="flex justify-between border-t border-outline-variant/60 pt-1.5 mt-1.5"><span class="text-on-surface-variant">Custo por porção</span><span>${money(costPerServing)}</span></div>
-      <div class="flex justify-between font-bold text-primary"><span>Lucro líquido estimado</span><span>${money(netProfit)}</span></div>
-    </div>
-
-    <button data-action="save-calc" data-id="${r.id}" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold flex items-center justify-center gap-2">
-      <span class="material-symbols-outlined">save</span> Salvar cálculo na receita
-    </button>
-  </div>`;
-}
-
 /* ================= ESTOQUE ================= */
 function stockListView(){
   const q = normName(VIEW.stockQuery);
@@ -572,7 +486,7 @@ function stockListView(){
           <div class="flex-1 min-w-0">
             <p class="text-sm font-semibold text-on-surface truncate">${s.name}</p>
             <p class="text-xs text-on-surface-variant">${fmtQty(s.qty,s.unit)} ${s.minQty?`· mínimo ${fmtQty(s.minQty,s.unit)}`:''}</p>
-            <p class="text-xs ${uc?'text-primary font-semibold':'text-secondary'} mt-0.5">${uc? `${money(uc.value)} / ${s.unit} (pago ${money(s.purchasePrice)} em ${fmtQty(s.purchaseQty,s.unit)})` : 'Cadastre o valor pago para calcular custo'}</p>
+            <p class="text-xs ${uc?'text-primary font-semibold':'text-secondary'} mt-0.5">${uc? `${money(uc.value)} / ${uc.base} (pago ${money(s.purchasePrice)} em ${fmtQty(s.purchaseQty,s.purchaseUnit||s.unit)})` : 'Cadastre o valor pago para calcular custo'}</p>
           </div>
           <span class="text-[10px] font-bold px-2 py-1 rounded-full ${meta.bg} ${meta.text} shrink-0">${meta.label}</span>
           <button data-action="edit-stock" data-id="${s.id}" class="text-on-surface-variant"><span class="material-symbols-outlined text-lg">edit</span></button>
@@ -585,7 +499,7 @@ function stockListView(){
 
 function stockFormView(){
   const editing = DB.stock.find(s=>s.id===VIEW.editId);
-  const s = editing || {name:'', qty:'', unit:'g', minQty:'', purchasePrice:'', purchaseQty:''};
+  const s = editing || {name:'', qty:'', unit:'g', minQty:'', purchasePrice:'', purchaseQty:'', purchaseUnit:'g'};
   return `${header(editing?'Editar Item':'Novo Item de Estoque', null, 'back-stock')}
   <form id="stock-form" class="px-5 pt-4 pb-10 space-y-4">
     <div>
@@ -605,17 +519,21 @@ function stockFormView(){
 
     <div class="bg-surface-container-low rounded-lg p-3 border border-outline-variant/60">
       <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-2">Compra de referência (usada no cálculo de custo)</p>
-      <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs font-semibold text-on-surface-variant">Por quanto você comprou? (R$ total pago)</label>
+        <input name="purchasePrice" type="number" step="0.01" min="0" required value="${s.purchasePrice}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5"/>
+      </div>
+      <div class="grid grid-cols-2 gap-3 mt-3">
         <div>
-          <label class="text-xs font-semibold text-on-surface-variant">Por quanto você comprou? (R$ total pago)</label>
-          <input name="purchasePrice" type="number" step="0.01" min="0" required value="${s.purchasePrice}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5"/>
-        </div>
-        <div>
-          <label class="text-xs font-semibold text-on-surface-variant">Qual a quantidade total da embalagem? (em ${s.unit||'g'})</label>
+          <label class="text-xs font-semibold text-on-surface-variant">Quantidade total da embalagem</label>
           <input name="purchaseQty" type="number" step="0.01" min="0" required value="${s.purchaseQty}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5"/>
         </div>
+        <div>
+          <label class="text-xs font-semibold text-on-surface-variant">Unidade da embalagem</label>
+          <select name="purchaseUnit" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5">${UNIT_LIST.map(u=>`<option value="${u}" ${(s.purchaseUnit||s.unit)===u?'selected':''}>${u}</option>`).join('')}</select>
+        </div>
       </div>
-      <p class="text-[11px] text-on-surface-variant mt-2">Ex: paguei R$ 5,29 por um pacote de 100g de fermento. O app calcula sozinho o custo por grama.</p>
+      <p class="text-[11px] text-on-surface-variant mt-2">Ex: paguei R$ 5,29 por um pacote de 100g de fermento. O app calcula sozinho o custo por grama — mesmo se a embalagem for em unidade diferente do estoque atual.</p>
     </div>
 
     <button type="submit" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold">Salvar</button>
@@ -727,9 +645,8 @@ function onAppClick(e){
   if(action==='new-recipe'){ VIEW.editId=null; go({tab:'recipes', screen:'form'}); }
   else if(action==='edit-recipe'){ VIEW.editId=t.dataset.id; go({tab:'recipes', screen:'form'}); }
   else if(action==='cancel-form'){ go({tab:'recipes', screen: VIEW.editId? 'detail':'list', recipeId: VIEW.editId||VIEW.recipeId}); }
-  else if(action==='open-recipe'){ go({tab:'recipes', screen:'detail', recipeId:t.dataset.id, calcSection:'ingredients', checked:{}}); }
+  else if(action==='open-recipe'){ go({tab:'recipes', screen:'detail', recipeId:t.dataset.id, checked:{}}); }
   else if(action==='back-to-list'){ go({tab:'recipes', screen:'list'}); }
-  else if(action==='calc-section'){ go({calcSection:t.dataset.section}); }
   else if(action==='toggle-check'){ VIEW.checked[t.dataset.id] = t.checked; }
   else if(action==='delete-recipe'){
     if(confirm('Tem certeza que deseja excluir esta receita?')){
@@ -740,8 +657,6 @@ function onAppClick(e){
   else if(action==='add-step-row'){ const rows=document.getElementById('step-rows'); rows.insertAdjacentHTML('beforeend', stepRow('', rows.children.length)); }
   else if(action==='remove-row'){ t.closest('.ing-row,.step-row').remove(); }
   else if(action==='finalize-recipe'){ finalizeRecipe(t.dataset.id); }
-  else if(action==='apply-markup'){ setRecipeField(VIEW.recipeId, 'markup', parseFloat(t.dataset.value)); render(); }
-  else if(action==='save-calc'){ saveDB(); showToast('Cálculo salvo na receita! 💚'); }
 
   else if(action==='new-stock'){ VIEW.editId=null; go({tab:'stock', screen:'form'}); }
   else if(action==='edit-stock'){ VIEW.editId=t.dataset.id; go({tab:'stock', screen:'form'}); }
@@ -761,33 +676,12 @@ function onAppClick(e){
 function onAppInput(e){
   if(e.target.id==='stock-search'){ VIEW.stockQuery = e.target.value; renderKeepFocus('stock-search'); }
   if(e.target.id==='price-search'){ VIEW.priceQuery = e.target.value; renderKeepFocus('price-search'); }
-  if(e.target.dataset.field && VIEW.tab==='recipes' && VIEW.screen==='detail'){
-    const field = e.target.dataset.field;
-    const val = parseFloat(e.target.value)||0;
-    setRecipeField(VIEW.recipeId, field, val);
-    if(field==='markup'){
-      // live-update just the price/slider label without full rerender jank
-      render();
-    }
-  }
 }
-function onAppChange(e){
-  if(e.target.dataset.field){
-    const field = e.target.dataset.field;
-    const val = parseFloat(e.target.value)||0;
-    setRecipeField(VIEW.recipeId, field, val);
-    saveDB();
-  }
-}
+function onAppChange(e){}
 function renderKeepFocus(id){
   render();
   const el = document.getElementById(id);
   if(el){ el.focus(); const v=el.value; el.value=''; el.value=v; }
-}
-
-function setRecipeField(id, field, val){
-  const r = DB.recipes.find(x=>x.id===id);
-  if(r) r[field] = val;
 }
 
 function onAppSubmit(e){
@@ -815,19 +709,16 @@ function submitRecipeForm(form){
     name: fd.get('name').trim(),
     servings: parseInt(fd.get('servings'))||1,
     sliceWeight: fd.get('sliceWeight')?parseFloat(fd.get('sliceWeight')):null,
-    laborCost: parseFloat(fd.get('laborCost'))||0,
-    packagingCost: parseFloat(fd.get('packagingCost'))||0,
-    taxPercent: parseFloat(fd.get('taxPercent'))||0,
     ingredients, steps,
   };
   if(VIEW.editId){
     const r = DB.recipes.find(x=>x.id===VIEW.editId);
     Object.assign(r, data);
-    saveDB(); showToast('Receita atualizada! 💚'); go({tab:'recipes', screen:'detail', recipeId:r.id, calcSection:'ingredients'});
+    saveDB(); showToast('Receita atualizada! 💚'); go({tab:'recipes', screen:'detail', recipeId:r.id});
   } else {
-    const r = { id: uid(), markup: 2.5, ...data };
+    const r = { id: uid(), ...data };
     DB.recipes.push(r);
-    saveDB(); showToast('Receita salva com carinho! 💚'); go({tab:'recipes', screen:'detail', recipeId:r.id, calcSection:'ingredients', checked:{}});
+    saveDB(); showToast('Receita salva com carinho! 💚'); go({tab:'recipes', screen:'detail', recipeId:r.id, checked:{}});
   }
 }
 
@@ -840,6 +731,7 @@ function submitStockForm(form){
     minQty: fd.get('minQty')?parseFloat(fd.get('minQty')):0,
     purchasePrice: parseFloat(fd.get('purchasePrice'))||0,
     purchaseQty: parseFloat(fd.get('purchaseQty'))||0,
+    purchaseUnit: fd.get('purchaseUnit'),
   };
   if(VIEW.editId){
     Object.assign(DB.stock.find(s=>s.id===VIEW.editId), data);
