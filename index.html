@@ -139,15 +139,15 @@ function seedData(){
       ]
     }],
     stock: [
-      { id: uid(), name: 'Farinha de Trigo', qty: 2000, unit: 'g', minQty: 400 },
-      { id: uid(), name: 'Sal', qty: 500, unit: 'g', minQty: 50 },
-      { id: uid(), name: 'Fermento Químico', qty: 100, unit: 'g', minQty: 30 },
-      { id: uid(), name: 'Bicarbonato de Sódio', qty: 10, unit: 'g', minQty: 15 },
-      { id: uid(), name: 'Manteiga Sem Sal', qty: 400, unit: 'g', minQty: 100 },
-      { id: uid(), name: 'Açúcar Mascavo', qty: 1000, unit: 'g', minQty: 150 },
-      { id: uid(), name: 'Açúcar Comum', qty: 5000, unit: 'g', minQty: 200 },
-      { id: uid(), name: 'Essência de Baunilha', qty: 30, unit: 'ml', minQty: 10 },
-      { id: uid(), name: 'Gotas de Chocolate', qty: 360, unit: 'g', minQty: 100 },
+      { id: uid(), name: 'Farinha de Trigo', qty: 2000, unit: 'g', minQty: 400, purchasePrice: 9.90, purchaseQty: 2000 },
+      { id: uid(), name: 'Sal', qty: 500, unit: 'g', minQty: 50, purchasePrice: 2.50, purchaseQty: 500 },
+      { id: uid(), name: 'Fermento Químico', qty: 100, unit: 'g', minQty: 30, purchasePrice: 5.29, purchaseQty: 100 },
+      { id: uid(), name: 'Bicarbonato de Sódio', qty: 10, unit: 'g', minQty: 15, purchasePrice: 3.20, purchaseQty: 60 },
+      { id: uid(), name: 'Manteiga Sem Sal', qty: 400, unit: 'g', minQty: 100, purchasePrice: 8.50, purchaseQty: 200 },
+      { id: uid(), name: 'Açúcar Mascavo', qty: 1000, unit: 'g', minQty: 150, purchasePrice: 6.90, purchaseQty: 1000 },
+      { id: uid(), name: 'Açúcar Comum', qty: 5000, unit: 'g', minQty: 200, purchasePrice: 18.00, purchaseQty: 5000 },
+      { id: uid(), name: 'Essência de Baunilha', qty: 30, unit: 'ml', minQty: 10, purchasePrice: 7.00, purchaseQty: 30 },
+      { id: uid(), name: 'Gotas de Chocolate', qty: 360, unit: 'g', minQty: 100, purchasePrice: 6.99, purchaseQty: 100 },
     ],
     prices: [
       { id: priceIds[0], ingredientName: 'Chocolate em Gotas', store: 'Empório Di Grano', price: 6.99, packageQty: 100, packageUnit: 'g', updatedAt: '2024-02-12' },
@@ -188,27 +188,36 @@ async function saveDB(){
   }
 }
 
-/* ---------------- Cost engine ---------------- */
-function findPriceEntries(ingredientName){
-  const n = normName(ingredientName);
-  return DB.prices.filter(p => normName(p.ingredientName) === n || normName(p.ingredientName).includes(n) || n.includes(normName(p.ingredientName)));
-}
+/* Helper used ONLY to display comparisons inside the Preços (market research) tab.
+   Never used for recipe cost calculations. */
 function pricePerBase(entry){
   const b = toBase(entry.packageQty, entry.packageUnit);
   if(!b.qty) return null;
   return { value: entry.price / b.qty, base: b.base };
 }
-function bestPriceFor(ingredientName, neededBase){
-  const entries = findPriceEntries(ingredientName).map(e => ({ e, pb: pricePerBase(e) })).filter(x => x.pb && x.pb.base === neededBase);
-  if(!entries.length) return null;
-  entries.sort((a,b)=>a.pb.value-b.pb.value);
-  return entries[0];
+
+/* ---------------- Cost engine ----------------
+   Regra: o custo de cada ingrediente vem SEMPRE do que foi pago,
+   cadastrado na aba Estoque (valor pago + tamanho da embalagem comprada).
+   A aba Preços é só pesquisa de mercado e NUNCA entra nesse cálculo. */
+function stockFor(name){
+  const n = normName(name);
+  return DB.stock.find(s => normName(s.name) === n);
+}
+function stockUnitCost(s){
+  if(!s || !s.purchasePrice || !s.purchaseQty) return null;
+  const b = toBase(s.purchaseQty, s.unit);
+  if(!b.qty) return null;
+  return { value: s.purchasePrice / b.qty, base: b.base };
 }
 function computeIngredientCost(ing){
+  const s = stockFor(ing.name);
+  const uc = stockUnitCost(s);
+  if(!s) return { cost: 0, matched: false, reason: 'sem-estoque' };
+  if(!uc) return { cost: 0, matched: false, reason: 'sem-valor-pago' };
   const b = toBase(ing.qty, ing.unit);
-  const best = bestPriceFor(ing.name, b.base);
-  if(!best) return { cost: 0, matched: false };
-  return { cost: best.pb.value * b.qty, matched: true, store: best.e.store, unitPrice: best.pb };
+  if(b.base !== uc.base) return { cost: 0, matched: false, reason: 'unidade-incompativel' };
+  return { cost: uc.value * b.qty, matched: true, unitCost: uc };
 }
 function computeRecipeCost(recipe){
   let ingredientsCost = 0; let anyUnmatched = false;
@@ -219,10 +228,6 @@ function computeRecipeCost(recipe){
     return { ing, ...r };
   });
   return { ingredientsCost, anyUnmatched, lines };
-}
-function stockFor(name){
-  const n = normName(name);
-  return DB.stock.find(s => normName(s.name) === n);
 }
 function stockStatus(s){
   if(!s) return null;
@@ -491,7 +496,7 @@ function recipeSaleCalcSection(r){
         ${lines.map(l=>`<div class="flex items-center justify-between text-sm">
           <div class="min-w-0 flex-1">
             <p class="text-on-surface font-medium truncate">${l.ing.name}</p>
-            <p class="text-xs text-on-surface-variant">${fmtQty(l.ing.qty,l.ing.unit)} ${l.matched?`· menor preço em ${l.store}`:'· sem preço cadastrado'}</p>
+            <p class="text-xs text-on-surface-variant">${fmtQty(l.ing.qty,l.ing.unit)} ${l.matched?'· baseado na compra cadastrada no Estoque':(l.reason==='sem-estoque'?'· ingrediente sem item no Estoque':(l.reason==='unidade-incompativel'?'· unidade do Estoque não bate com a da receita':'· falta cadastrar valor pago no Estoque'))}</p>
           </div>
           <p class="font-semibold ${l.matched?'text-on-surface':'text-outline'}">${money(l.cost)}</p>
         </div>`).join('')}
@@ -499,7 +504,7 @@ function recipeSaleCalcSection(r){
       <div class="border-t border-outline-variant/60 mt-3 pt-3 flex justify-between text-sm font-bold">
         <span>Total Insumos</span><span>${money(ingredientsCost)}</span>
       </div>
-      ${anyUnmatched?`<p class="text-xs text-secondary mt-2">Algum ingrediente ainda não tem preço na aba Preços — cadastre para um cálculo mais exato.</p>`:''}
+      ${anyUnmatched?`<p class="text-xs text-secondary mt-2">Algum ingrediente ainda não tem o valor pago cadastrado no Estoque — edite o item lá pra esse cálculo ficar completo.</p>`:''}
     </div>
 
     <div class="grid grid-cols-3 gap-2 mb-4">
@@ -562,10 +567,12 @@ function stockListView(){
     ${items.length===0?emptyState('inventory_2','Nenhum item no estoque','Toque no + para adicionar seus ingredientes.'):`<div class="space-y-2">
       ${items.map(s=>{
         const status = stockStatus(s); const meta = STATUS_META[status];
+        const uc = stockUnitCost(s);
         return `<div class="bg-surface-container-lowest rounded-lg border border-outline-variant/60 p-3 flex items-center gap-3">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-semibold text-on-surface truncate">${s.name}</p>
             <p class="text-xs text-on-surface-variant">${fmtQty(s.qty,s.unit)} ${s.minQty?`· mínimo ${fmtQty(s.minQty,s.unit)}`:''}</p>
+            <p class="text-xs ${uc?'text-primary font-semibold':'text-secondary'} mt-0.5">${uc? `${money(uc.value)} / ${s.unit} (pago ${money(s.purchasePrice)} em ${fmtQty(s.purchaseQty,s.unit)})` : 'Cadastre o valor pago para calcular custo'}</p>
           </div>
           <span class="text-[10px] font-bold px-2 py-1 rounded-full ${meta.bg} ${meta.text} shrink-0">${meta.label}</span>
           <button data-action="edit-stock" data-id="${s.id}" class="text-on-surface-variant"><span class="material-symbols-outlined text-lg">edit</span></button>
@@ -578,7 +585,7 @@ function stockListView(){
 
 function stockFormView(){
   const editing = DB.stock.find(s=>s.id===VIEW.editId);
-  const s = editing || {name:'', qty:'', unit:'g', minQty:''};
+  const s = editing || {name:'', qty:'', unit:'g', minQty:'', purchasePrice:'', purchaseQty:''};
   return `${header(editing?'Editar Item':'Novo Item de Estoque', null, 'back-stock')}
   <form id="stock-form" class="px-5 pt-4 pb-10 space-y-4">
     <div>
@@ -586,7 +593,7 @@ function stockFormView(){
       <input name="name" required value="${s.name}" placeholder="Ex: Farinha de Trigo" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
     </div>
     <div class="grid grid-cols-2 gap-3">
-      <div><label class="text-xs font-semibold text-on-surface-variant">Quantidade total</label><input name="qty" type="number" step="0.01" min="0" required value="${s.qty}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/></div>
+      <div><label class="text-xs font-semibold text-on-surface-variant">Quantidade atual em estoque</label><input name="qty" type="number" step="0.01" min="0" required value="${s.qty}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/></div>
       <div><label class="text-xs font-semibold text-on-surface-variant">Unidade</label>
         <select name="unit" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5">${UNIT_LIST.map(u=>`<option value="${u}" ${s.unit===u?'selected':''}>${u}</option>`).join('')}</select>
       </div>
@@ -595,6 +602,22 @@ function stockFormView(){
       <label class="text-xs font-semibold text-on-surface-variant">Estoque mínimo (avisa quando ficar baixo) — opcional</label>
       <input name="minQty" type="number" step="0.01" min="0" value="${s.minQty||''}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2.5"/>
     </div>
+
+    <div class="bg-surface-container-low rounded-lg p-3 border border-outline-variant/60">
+      <p class="text-xs font-bold uppercase tracking-wide text-on-surface-variant mb-2">Compra de referência (usada no cálculo de custo)</p>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs font-semibold text-on-surface-variant">Por quanto você comprou? (R$ total pago)</label>
+          <input name="purchasePrice" type="number" step="0.01" min="0" required value="${s.purchasePrice}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5"/>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-on-surface-variant">Qual a quantidade total da embalagem? (em ${s.unit||'g'})</label>
+          <input name="purchaseQty" type="number" step="0.01" min="0" required value="${s.purchaseQty}" class="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-3 py-2.5"/>
+        </div>
+      </div>
+      <p class="text-[11px] text-on-surface-variant mt-2">Ex: paguei R$ 5,29 por um pacote de 100g de fermento. O app calcula sozinho o custo por grama.</p>
+    </div>
+
     <button type="submit" class="w-full bg-primary text-on-primary rounded-lg py-3.5 font-semibold">Salvar</button>
     ${editing?`<button type="button" data-action="delete-stock" data-id="${editing.id}" class="w-full text-error rounded-lg py-3 font-semibold text-sm">Remover item</button>`:''}
   </form>`;
@@ -810,7 +833,14 @@ function submitRecipeForm(form){
 
 function submitStockForm(form){
   const fd = new FormData(form);
-  const data = { name: capitalize(fd.get('name').trim()), qty: parseFloat(fd.get('qty'))||0, unit: fd.get('unit'), minQty: fd.get('minQty')?parseFloat(fd.get('minQty')):0 };
+  const data = {
+    name: capitalize(fd.get('name').trim()),
+    qty: parseFloat(fd.get('qty'))||0,
+    unit: fd.get('unit'),
+    minQty: fd.get('minQty')?parseFloat(fd.get('minQty')):0,
+    purchasePrice: parseFloat(fd.get('purchasePrice'))||0,
+    purchaseQty: parseFloat(fd.get('purchaseQty'))||0,
+  };
   if(VIEW.editId){
     Object.assign(DB.stock.find(s=>s.id===VIEW.editId), data);
     showToast('Estoque atualizado!');
